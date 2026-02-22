@@ -1,0 +1,183 @@
+flowchart TD
+    Start([🚀 Application Start]) --> Docker[🐳 Docker Compose Up]
+    
+    %% Docker Infrastructure Setup
+    Docker --> Zookeeper[Zookeeper Container Starts<br/>Port: 2181<br/>Image: confluentinc/cp-zookeeper:7.5.0]
+    Zookeeper --> Kafka[Kafka Broker Starts<br/>Port: 9092<br/>Image: confluentinc/cp-kafka:7.5.0<br/>Connects to Zookeeper:2181]
+    Kafka --> Postgres[PostgreSQL Container Starts<br/>Port: 5433:5432<br/>Image: postgres:15]
+    Postgres --> KafkaUI[Kafka UI Starts<br/>Port: 8080<br/>Image: provectuslabs/kafka-ui]
+    
+    %% Database Initialization
+    KafkaUI --> DBCreate[Database 'orderdb' Created<br/>User: admin<br/>Password: admin123]
+    
+    %% Spring Boot Initialization
+    DBCreate --> SpringBoot[🍃 Spring Boot Application Starts]
+    SpringBoot --> LoadConfig[Load application.properties<br/>Server Port: 8083<br/>DB URL: jdbc:postgresql://localhost:5433/orderdb<br/>Kafka: localhost:9092<br/>Gmail SMTP: smtp.gmail.com:587]
+    
+    LoadConfig --> DBConnection{Database Connection}
+    DBConnection -->|Success| KafkaConnection{Kafka Connection}
+    DBConnection -->|Fail| Error1[❌ Connection Error<br/>Check Docker & Port 5433]
+    
+    KafkaConnection -->|Success| Hibernate[Hibernate Initializes]
+    KafkaConnection -->|Fail| Error2[❌ Kafka Connection Error<br/>Check Kafka & Zookeeper]
+    
+    %% Table Creation
+    Hibernate --> CreateTable["CREATE TABLE orders (<br/>id BIGINT PRIMARY KEY AUTO_INCREMENT,<br/>product_name VARCHAR(255),<br/>quantity INT,<br/>price DECIMAL,<br/>customer_email VARCHAR(255),<br/>status VARCHAR(50),<br/>created_at TIMESTAMP)"]
+    
+    %% Kafka Topic Creation
+    CreateTable --> TopicCreate[Kafka Auto-Creates Topic<br/>'order-events'<br/>Partitions: 1<br/>Replication Factor: 1]
+    
+    %% Consumer Groups Registration
+    TopicCreate --> ConsumerGroups[3 Consumer Groups Register:<br/>1️⃣ email-group<br/>2️⃣ sms-group<br/>3️⃣ analytics-group]
+    
+    ConsumerGroups --> ServerStart[Tomcat Server Starts<br/>http://localhost:8083]
+    ServerStart --> Ready[✅ Application Ready<br/>Kafka Consumers Listening<br/>Waiting for API Requests]
+    
+    %% API Request Handling
+    Ready --> APIRequest{API Request}
+    
+    %% CREATE ORDER FLOW
+    APIRequest -->|POST /api/orders| CreateExample["📝 Example Request:<br/>curl -X POST http://localhost:8083/api/orders<br/>-H 'Content-Type: application/json'<br/>-d '{<br/>  'productName': 'Laptop',<br/>  'quantity': 2,<br/>  'price': 1200.00,<br/>  'customerEmail': 'sid370578@gmail.com'<br/>'}'"]
+    
+    CreateExample --> CreateOrder[OrderController.createOrder]
+    CreateOrder --> SaveDB[OrderRepository.save]
+    SaveDB --> InsertSQL["INSERT INTO orders<br/>VALUES (1, 'Laptop', 2, 1200.00,<br/>'sid370578@gmail.com', 'PENDING',<br/>'2026-02-22 23:31:50')"]
+    
+    InsertSQL --> DBStored1[("💾 PostgreSQL Database:<br/>id=1<br/>product_name='Laptop'<br/>quantity=2<br/>price=1200.00<br/>customer_email='sid370578@gmail.com'<br/>status='PENDING'<br/>created_at='2026-02-22 23:31:50'")]
+    
+    DBStored1 --> PublishEvent[OrderService.publishOrderEvent<br/>Event Type: ORDER_CREATED]
+    
+    %% Kafka Event Publishing
+    PublishEvent --> KafkaProducer[KafkaTemplate.send<br/>Topic: 'order-events'<br/>Key: orderId<br/>Value: OrderEvent JSON]
+    
+    KafkaProducer --> KafkaBroker[("📨 Kafka Broker:<br/>Topic: order-events<br/>Partition: 0<br/>Offset: 0<br/>Message: {<br/>  eventType: 'ORDER_CREATED',<br/>  orderId: 1,<br/>  productName: 'Laptop',<br/>  quantity: 2,<br/>  price: 1200.00,<br/>  customerEmail: 'sid370578@gmail.com',<br/>  status: 'PENDING'<br/>}")]
+    
+    KafkaBroker --> ZookeeperStore[("🗂️ Zookeeper:<br/>Stores Kafka Metadata:<br/>- Broker info<br/>- Topic partitions<br/>- Consumer group offsets<br/>- Leader election data")]
+    
+    %% Parallel Consumer Processing
+    ZookeeperStore --> EmailConsumer[📧 Email Consumer<br/>@KafkaListener<br/>Group: email-group<br/>Receives ORDER_CREATED event]
+    ZookeeperStore --> SMSConsumer[📱 SMS Consumer<br/>@KafkaListener<br/>Group: sms-group<br/>Receives ORDER_CREATED event]
+    ZookeeperStore --> AnalyticsConsumer[📊 Analytics Consumer<br/>@KafkaListener<br/>Group: analytics-group<br/>Receives ORDER_CREATED event]
+    
+    %% Email Service Processing
+    EmailConsumer --> EmailService[EmailService.sendOrderConfirmationEmail]
+    EmailService --> GmailSMTP[("📬 Gmail SMTP Server:<br/>smtp.gmail.com:587<br/>From: sid370578@gmail.com<br/>To: sid370578@gmail.com<br/>Subject: Order Confirmation - Order #1<br/>Body:<br/>Dear Customer,<br/>Your order has been confirmed!<br/>Order ID: 1<br/>Product: Laptop<br/>Quantity: 2<br/>Price: $1200.0<br/>Total: $2400.0")]
+    
+    GmailSMTP --> EmailSent[✅ Email Sent Successfully<br/>Console: Email sent to sid370578@gmail.com]
+    
+    %% SMS Service Processing
+    SMSConsumer --> SMSService[SMSService.sendOrderNotification]
+    SMSService --> SMSLog[("📱 SMS Service (Mock):<br/>Console Output:<br/>✅ Sending SMS notification<br/>Message: Your order #1 has been placed!<br/>Product: Laptop<br/>Quantity: 2")]
+    
+    %% Analytics Service Processing
+    AnalyticsConsumer --> AnalyticsService[AnalyticsService.trackOrderMetrics]
+    AnalyticsService --> AnalyticsLog[("📊 Analytics Service:<br/>Console Output:<br/>✅ Tracking order metrics<br/>Event: ORDER_CREATED<br/>Order ID: 1<br/>Revenue: $2400.0<br/>Product: Laptop")]
+    
+    %% Response to Client
+    KafkaProducer --> ReturnCreated["✅ Response 201 Created:<br/>{<br/>  'id': 1,<br/>  'productName': 'Laptop',<br/>  'quantity': 2,<br/>  'price': 1200.0,<br/>  'customerEmail': 'sid370578@gmail.com',<br/>  'status': 'PENDING',<br/>  'createdAt': '2026-02-22T23:31:50.126173'<br/>}"]
+    
+    %% GET ALL ORDERS FLOW
+    APIRequest -->|GET /api/orders| GetAllOrders["📝 Example Request:<br/>curl http://localhost:8083/api/orders"]
+    GetAllOrders --> FindAll[OrderRepository.findAll]
+    FindAll --> SelectSQL["SELECT * FROM orders<br/>ORDER BY created_at DESC"]
+    
+    SelectSQL --> DBQuery1[("💾 PostgreSQL Returns:<br/>Row 1: id=1, product='Laptop', qty=2, price=1200.00<br/>Row 2: id=2, product='iPhone', qty=1, price=999.00<br/>Row 3: id=3, product='Mouse', qty=5, price=25.00")]
+    
+    DBQuery1 --> ReturnList["✅ Response 200 OK:<br/>[<br/>  {id:1, productName:'Laptop', quantity:2, price:1200.0},<br/>  {id:2, productName:'iPhone', quantity:1, price:999.0},<br/>  {id:3, productName:'Mouse', quantity:5, price:25.0}<br/>]"]
+    
+    %% GET ORDER BY ID FLOW
+    APIRequest -->|GET /api/orders/1| GetOrderById["📝 Example Request:<br/>curl http://localhost:8083/api/orders/1"]
+    GetOrderById --> FindById[OrderRepository.findById 1]
+    FindById --> SelectByIdSQL["SELECT * FROM orders<br/>WHERE id = 1"]
+    
+    SelectByIdSQL --> CheckExists{Order Exists?}
+    CheckExists -->|Yes| DBQuery2[("💾 PostgreSQL Returns:<br/>id=1<br/>product_name='Laptop'<br/>quantity=2<br/>price=1200.00<br/>customer_email='sid370578@gmail.com'<br/>status='PENDING'")]
+    
+    DBQuery2 --> ReturnOrder["✅ Response 200 OK:<br/>{<br/>  'id': 1,<br/>  'productName': 'Laptop',<br/>  'quantity': 2,<br/>  'price': 1200.0,<br/>  'customerEmail': 'sid370578@gmail.com',<br/>  'status': 'PENDING'<br/>}"]
+    
+    CheckExists -->|No| Return404["❌ Response 404:<br/>{<br/>  'error': 'Order not found with id: 1'<br/>}"]
+    
+    %% UPDATE ORDER FLOW
+    APIRequest -->|PUT /api/orders/1| UpdateExample["📝 Example Request:<br/>curl -X PUT http://localhost:8083/api/orders/1<br/>-H 'Content-Type: application/json'<br/>-d '{<br/>  'productName': 'Laptop Pro',<br/>  'quantity': 3,<br/>  'price': 1500.00,<br/>  'customerEmail': 'sid370578@gmail.com',<br/>  'status': 'CONFIRMED'<br/>'}'"]
+    
+    UpdateExample --> UpdateOrder[OrderController.updateOrder]
+    UpdateOrder --> FindForUpdate[OrderRepository.findById 1]
+    FindForUpdate --> CheckUpdate{Order Exists?}
+    
+    CheckUpdate -->|Yes| UpdateFields[Update Fields:<br/>product_name = 'Laptop Pro'<br/>quantity = 3<br/>price = 1500.00<br/>status = 'CONFIRMED']
+    CheckUpdate -->|No| Return404Update["❌ Response 404:<br/>Order not found"]
+    
+    UpdateFields --> SaveUpdate[OrderRepository.save]
+    SaveUpdate --> UpdateSQL["UPDATE orders<br/>SET product_name='Laptop Pro',<br/>quantity=3, price=1500.00,<br/>status='CONFIRMED'<br/>WHERE id=1"]
+    
+    UpdateSQL --> DBUpdated[("💾 PostgreSQL Updated:<br/>id=1<br/>product_name='Laptop Pro'<br/>quantity=3<br/>price=1500.00<br/>status='CONFIRMED'")]
+    
+    DBUpdated --> PublishUpdateEvent[Publish ORDER_UPDATED Event]
+    PublishUpdateEvent --> KafkaUpdate[("📨 Kafka: ORDER_UPDATED<br/>Topic: order-events<br/>Offset: 1")]
+    
+    KafkaUpdate --> EmailUpdate[📧 Email: Order Updated]
+    KafkaUpdate --> SMSUpdate[📱 SMS: Order Updated]
+    KafkaUpdate --> AnalyticsUpdate[📊 Analytics: Track Update]
+    
+    EmailUpdate --> ReturnUpdated["✅ Response 200 OK:<br/>{<br/>  'id': 1,<br/>  'productName': 'Laptop Pro',<br/>  'quantity': 3,<br/>  'price': 1500.0,<br/>  'status': 'CONFIRMED'<br/>}"]
+    
+    %% DELETE ORDER FLOW
+    APIRequest -->|DELETE /api/orders/1| DeleteExample["📝 Example Request:<br/>curl -X DELETE http://localhost:8083/api/orders/1"]
+    DeleteExample --> DeleteOrder[OrderController.deleteOrder]
+    DeleteOrder --> FindForDelete[OrderRepository.findById 1]
+    
+    FindForDelete --> CheckDelete{Order Exists?}
+    CheckDelete -->|Yes| PublishDeleteEvent[Publish ORDER_DELETED Event]
+    CheckDelete -->|No| Return404Delete["❌ Response 404:<br/>Order not found"]
+    
+    PublishDeleteEvent --> KafkaDelete[("📨 Kafka: ORDER_DELETED<br/>Topic: order-events<br/>Offset: 2")]
+    
+    KafkaDelete --> EmailDelete[📧 Email: Order Cancelled]
+    KafkaDelete --> SMSDelete[📱 SMS: Order Cancelled]
+    KafkaDelete --> AnalyticsDelete[📊 Analytics: Track Cancellation]
+    
+    EmailDelete --> DeleteDB[OrderRepository.delete]
+    DeleteDB --> DeleteSQL["DELETE FROM orders<br/>WHERE id = 1"]
+    
+    DeleteSQL --> DBDeleted[("💾 PostgreSQL:<br/>Row with id=1 deleted<br/>'Laptop Pro' removed")]
+    
+    DBDeleted --> Return204["✅ Response 204 No Content<br/>(Empty body, deletion successful)"]
+    
+    %% Kafka UI Monitoring
+    KafkaBroker -.->|Monitor| KafkaUIView["🖥️ Kafka UI (localhost:8080):<br/>- View Topics<br/>- See Messages<br/>- Monitor Consumer Groups<br/>- Check Offsets<br/>- Real-time Metrics"]
+    
+    %% End States
+    ReturnCreated --> End([✅ Response Complete])
+    ReturnList --> End
+    ReturnOrder --> End
+    Return404 --> End
+    ReturnUpdated --> End
+    Return404Update --> End
+    Return204 --> End
+    Return404Delete --> End
+    Error1 --> End
+    Error2 --> End
+    EmailSent --> End
+    SMSLog --> End
+    AnalyticsLog --> End
+    SMSUpdate --> End
+    AnalyticsUpdate --> End
+    SMSDelete --> End
+    AnalyticsDelete --> End
+    
+    %% Styling
+    classDef dockerClass fill:#2496ED,stroke:#1D72AA,color:#fff
+    classDef kafkaClass fill:#231F20,stroke:#000,color:#fff
+    classDef dbClass fill:#336791,stroke:#2A5276,color:#fff
+    classDef springClass fill:#6DB33F,stroke:#5A9E34,color:#fff
+    classDef emailClass fill:#EA4335,stroke:#C5221F,color:#fff
+    classDef successClass fill:#34A853,stroke:#2D8E47,color:#fff
+    classDef errorClass fill:#FBBC04,stroke:#F9AB00,color:#000
+    
+    class Docker,Zookeeper,Kafka,Postgres,KafkaUI dockerClass
+    class KafkaBroker,KafkaProducer,TopicCreate,ZookeeperStore,KafkaUpdate,KafkaDelete kafkaClass
+    class DBStored1,DBQuery1,DBQuery2,DBUpdated,DBDeleted,DBCreate dbClass
+    class SpringBoot,ServerStart,Ready springClass
+    class EmailConsumer,EmailService,GmailSMTP,EmailSent,EmailUpdate,EmailDelete emailClass
+    class ReturnCreated,ReturnList,ReturnOrder,ReturnUpdated,Return204,End successClass
+    class Error1,Error2,Return404,Return404Update,Return404Delete errorClass
