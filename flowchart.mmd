@@ -1,0 +1,83 @@
+graph TB
+    Start([Client/User]) --> API{API Request}
+    
+    %% GET All Products Flow
+    API -->|GET /api/products| GetAll[GET All Products]
+    GetAll --> CheckCache1{Check Redis Cache<br/>Key: products::SimpleKey}
+    CheckCache1 -->|Cache HIT ✅| ReturnCache1[Return from Redis<br/>⚡ FAST Response]
+    CheckCache1 -->|Cache MISS ❌| FetchDB1[Fetch from PostgreSQL<br/>SELECT * FROM products]
+    FetchDB1 --> StoreCache1[Store in Redis<br/>TTL: 10 minutes]
+    StoreCache1 --> ReturnDB1[Return to Client]
+    ReturnCache1 --> End1([Response Sent])
+    ReturnDB1 --> End1
+    
+    %% GET Product by ID Flow
+    API -->|GET /api/products/1| GetById[GET Product by ID]
+    GetById --> CheckCache2{Check Redis Cache<br/>Key: products::1}
+    CheckCache2 -->|Cache HIT ✅| ReturnCache2[Return from Redis<br/>⚡ FAST Response]
+    CheckCache2 -->|Cache MISS ❌| FetchDB2[Fetch from PostgreSQL<br/>SELECT * FROM products<br/>WHERE id = 1]
+    FetchDB2 --> StoreCache2[Store in Redis<br/>Key: products::1<br/>TTL: 10 minutes]
+    StoreCache2 --> ReturnDB2[Return to Client]
+    ReturnCache2 --> End2([Response Sent])
+    ReturnDB2 --> End2
+    
+    %% POST Create Product Flow
+    API -->|POST /api/products| Create[Create New Product]
+    Create --> SaveDB[Save to PostgreSQL<br/>INSERT INTO products]
+    SaveDB --> UpdateCache1[Update Redis Cache<br/>Key: products::new_id]
+    UpdateCache1 --> End3([Product Created])
+    
+    %% PUT Update Product Flow
+    API -->|PUT /api/products/1| Update[Update Product]
+    Update --> UpdateDB[Update PostgreSQL<br/>UPDATE products<br/>WHERE id = 1]
+    UpdateDB --> UpdateCache2[Update Redis Cache<br/>Key: products::1]
+    UpdateCache2 --> End4([Product Updated])
+    
+    %% DELETE Product Flow
+    API -->|DELETE /api/products/1| Delete[Delete Product]
+    Delete --> DeleteDB[Delete from PostgreSQL<br/>DELETE FROM products<br/>WHERE id = 1]
+    DeleteDB --> EvictCache[Remove from Redis<br/>Key: products::1]
+    EvictCache --> End5([Product Deleted])
+    
+    %% Clear Cache Flow
+    API -->|DELETE /api/products/cache/clear| ClearCache[Clear All Cache]
+    ClearCache --> ClearRedis[Clear All Redis Keys<br/>FLUSHDB products]
+    ClearRedis --> End6([Cache Cleared])
+    
+    %% Database Storage Example
+    subgraph PostgreSQL["🗄️ PostgreSQL Database"]
+        DBTable["products table<br/>━━━━━━━━━━━━━━━━<br/>id | name | description | price | quantity<br/>1 | Laptop | Gaming Laptop | 1200.0 | 10<br/>2 | Product 1 | Description 1 | 110.0 | 11<br/>3 | Product 2 | Description 2 | 120.0 | 12<br/>... (101 rows total)"]
+    end
+    
+    %% Redis Cache Storage Example
+    subgraph Redis["⚡ Redis Cache (In-Memory)"]
+        RedisKeys["Cached Keys:<br/>━━━━━━━━━━━━━━━━<br/>1️⃣ products::SimpleKey<br/>   → All Products List (101 items)<br/>   → Size: 16 KB<br/>   → TTL: 600 seconds<br/><br/>2️⃣ products::1<br/>   → Single Product (id=1)<br/>   → Data: id:1, name:Laptop, price:1200<br/>   → TTL: 600 seconds<br/><br/>3️⃣ products::2<br/>   → Single Product (id=2)<br/>   → TTL: 600 seconds"]
+    end
+    
+    %% Performance Comparison
+    subgraph Performance["📊 Performance Comparison"]
+        Perf["Database Query: ~50-100ms 🐢<br/>Redis Cache: ~1-5ms ⚡<br/>Speed Improvement: 10-50x faster!"]
+    end
+    
+    %% Cache Strategy
+    subgraph CacheStrategy["🎯 Caching Strategy"]
+        Strategy["@Cacheable → Read from cache<br/>@CachePut → Update cache<br/>@CacheEvict → Remove from cache<br/>TTL: 10 minutes (auto-expire)"]
+    end
+    
+    style Start fill:#e1f5ff
+    style End1 fill:#c8e6c9
+    style End2 fill:#c8e6c9
+    style End3 fill:#c8e6c9
+    style End4 fill:#c8e6c9
+    style End5 fill:#c8e6c9
+    style End6 fill:#c8e6c9
+    style CheckCache1 fill:#fff9c4
+    style CheckCache2 fill:#fff9c4
+    style ReturnCache1 fill:#a5d6a7
+    style ReturnCache2 fill:#a5d6a7
+    style FetchDB1 fill:#ffccbc
+    style FetchDB2 fill:#ffccbc
+    style PostgreSQL fill:#e3f2fd
+    style Redis fill:#fff3e0
+    style Performance fill:#f3e5f5
+    style CacheStrategy fill:#e8f5e9
