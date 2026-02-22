@@ -1,0 +1,78 @@
+flowchart TD
+    Start([Application Start]) --> Docker[Docker Compose Up]
+    Docker --> PostgresStart[PostgreSQL Container Starts<br/>Port: 5432]
+    PostgresStart --> DBCreate[Database 'tododb' Created<br/>User: postgres<br/>Password: postgres]
+    
+    DBCreate --> SpringBoot[Spring Boot Application Starts]
+    SpringBoot --> LoadConfig[Load application.properties<br/>URL: jdbc:postgresql://localhost:5432/tododb]
+    LoadConfig --> DBConnection{Database Connection}
+    
+    DBConnection -->|Success| Hibernate[Hibernate Initializes]
+    DBConnection -->|Fail| Error1[❌ Connection Error<br/>Check Docker & Port 5432]
+    
+    Hibernate --> CreateTable["CREATE TABLE todos (<br/>id BIGINT PRIMARY KEY,<br/>title VARCHAR(255),<br/>completed BOOLEAN)"]
+    CreateTable --> ServerStart[Tomcat Server Starts<br/>http://localhost:8081]
+    ServerStart --> Ready[✅ Application Ready<br/>Waiting for API Requests]
+    
+    Ready --> APIRequest{API Request}
+    
+    APIRequest -->|POST /api/todos| CreateExample["📝 Example Request:<br/>{<br/>'title': 'Buy Groceries',<br/>'completed': false<br/>}"]
+    CreateExample --> CreateTodo[TodoController.createTodo]
+    CreateTodo --> SaveDB[TodoRepository.save]
+    SaveDB --> InsertSQL["INSERT INTO todos<br/>VALUES (1, 'Buy Groceries', false)"]
+    InsertSQL --> DBStored1[("💾 Database:<br/>id=1<br/>title='Buy Groceries'<br/>completed=false")]
+    DBStored1 --> ReturnCreated["✅ Response 201 Created:<br/>{<br/>'id': 1,<br/>'title': 'Buy Groceries',<br/>'completed': false<br/>}"]
+    
+    APIRequest -->|GET /api/todos| GetAllTodos[TodoController.getAllTodos]
+    GetAllTodos --> FindAll[TodoRepository.findAll]
+    FindAll --> SelectSQL["SELECT * FROM todos"]
+    SelectSQL --> DBQuery1[("💾 Database Returns:<br/>Row 1: id=1, title='Buy Groceries', completed=false<br/>Row 2: id=2, title='Learn Spring', completed=true<br/>Row 3: id=3, title='Write Code', completed=false")]
+    DBQuery1 --> ReturnList["✅ Response 200 OK:<br/>[<br/>{id:1, title:'Buy Groceries', completed:false},<br/>{id:2, title:'Learn Spring', completed:true},<br/>{id:3, title:'Write Code', completed:false}<br/>]"]
+    
+    APIRequest -->|GET /api/todos/2| GetTodoById[TodoController.getTodoById<br/>Requested ID: 2]
+    GetTodoById --> FindById[TodoRepository.findById 2]
+    FindById --> SelectByIdSQL["SELECT * FROM todos<br/>WHERE id = 2"]
+    SelectByIdSQL --> CheckExists{Todo Exists?}
+    CheckExists -->|Yes| DBQuery2[("💾 Database Returns:<br/>id=2<br/>title='Learn Spring'<br/>completed=true")]
+    DBQuery2 --> ReturnTodo["✅ Response 200 OK:<br/>{<br/>'id': 2,<br/>'title': 'Learn Spring',<br/>'completed': true<br/>}"]
+    CheckExists -->|No| Return404["❌ Response 404:<br/>{<br/>'error': 'Todo not found'<br/>}"]
+    
+    APIRequest -->|PUT /api/todos/1| UpdateExample["📝 Example Request:<br/>{<br/>'title': 'Buy Groceries & Vegetables',<br/>'completed': true<br/>}"]
+    UpdateExample --> UpdateTodo[TodoController.updateTodo<br/>ID: 1]
+    UpdateTodo --> FindForUpdate[TodoRepository.findById 1]
+    FindForUpdate --> CheckUpdate{Todo Exists?}
+    CheckUpdate -->|Yes| UpdateFields[Update Fields:<br/>title = 'Buy Groceries & Vegetables'<br/>completed = true]
+    CheckUpdate -->|No| Return404Update["❌ Response 404:<br/>Todo not found"]
+    UpdateFields --> SaveUpdate[TodoRepository.save]
+    SaveUpdate --> UpdateSQL["UPDATE todos<br/>SET title='Buy Groceries & Vegetables',<br/>completed=true<br/>WHERE id=1"]
+    UpdateSQL --> DBUpdated[("💾 Database Updated:<br/>id=1<br/>title='Buy Groceries & Vegetables'<br/>completed=true")]
+    DBUpdated --> ReturnUpdated["✅ Response 200 OK:<br/>{<br/>'id': 1,<br/>'title': 'Buy Groceries & Vegetables',<br/>'completed': true<br/>}"]
+    
+    APIRequest -->|DELETE /api/todos/3| DeleteTodo[TodoController.deleteTodo<br/>ID: 3]
+    DeleteTodo --> FindForDelete[TodoRepository.findById 3]
+    FindForDelete --> CheckDelete{Todo Exists?}
+    CheckDelete -->|Yes| DeleteDB[TodoRepository.delete]
+    CheckDelete -->|No| Return404Delete["❌ Response 404:<br/>Todo not found"]
+    DeleteDB --> DeleteSQL["DELETE FROM todos<br/>WHERE id = 3"]
+    DeleteSQL --> DBDeleted[("💾 Database:<br/>Row with id=3 deleted<br/>'Write Code' removed")]
+    DBDeleted --> Return204["✅ Response 204 No Content<br/>(Empty body, deletion successful)"]
+    
+    ReturnCreated --> UIDisplay1["🖥️ UI Shows:<br/>New todo added to list"]
+    ReturnList --> UIDisplay2["🖥️ UI Shows:<br/>List of all todos with checkboxes"]
+    ReturnTodo --> UIDisplay3["🖥️ UI Shows:<br/>Single todo details"]
+    Return404 --> UIDisplay4["🖥️ UI Shows:<br/>Error message: Todo not found"]
+    ReturnUpdated --> UIDisplay5["🖥️ UI Shows:<br/>Updated todo with new values"]
+    Return404Update --> UIDisplay6["🖥️ UI Shows:<br/>Error: Cannot update"]
+    Return204 --> UIDisplay7["🖥️ UI Shows:<br/>Todo removed from list"]
+    Return404Delete --> UIDisplay8["🖥️ UI Shows:<br/>Error: Cannot delete"]
+    Error1 --> UIDisplay9["🖥️ UI Shows:<br/>Connection error page"]
+    
+    UIDisplay1 --> End([Response Complete])
+    UIDisplay2 --> End
+    UIDisplay3 --> End
+    UIDisplay4 --> End
+    UIDisplay5 --> End
+    UIDisplay6 --> End
+    UIDisplay7 --> End
+    UIDisplay8 --> End
+    UIDisplay9 --> End
